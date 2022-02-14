@@ -3,8 +3,10 @@
 #include <string.h>
 #include <sqlite3.h>
 #include "logger.h"
+sqlite3 *db;
 
 int flag = 0;
+char *globalProgramName;
 
 int callback(void *a_param, int argc, char **argv, char **column){
     for (int i=1; i< argc; i++)
@@ -14,61 +16,106 @@ int callback(void *a_param, int argc, char **argv, char **column){
     return 0;
 }
 
-void sqlQuery(char *message){
-    sqlite3 *db = NULL;
-    char *zErrMsg = 0;
+int openDatabase(char *programName){
     int rc;
+    char *zErrMsg = 0;
 
+     if (programName != NULL){
+        globalProgramName = programName;
+    }
+
+
+    
     rc = sqlite3_open("/var/log/logger.db", &db);
 
-    if( rc ) {
-    fprintf(stderr, "Can't create database: %s\n", sqlite3_errmsg(db));
-    } else {
-    fprintf(stderr, "Opened database successfully\n");
+    if( rc ){
+		sqlite3_close(db);
+		return 1;
+	}
+
+    char *sql = (char*) malloc(sizeof(char) * 200);
+        sprintf (sql,"CREATE TABLE IF NOT EXISTS Log (Id INTEGER PRIMARY KEY, Program TEXT, Message TEXT, Level TEXT, Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
+
+    rc = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
+    free(sql);
+    if( rc ){
+		sqlite3_close(db);
+		return 1;
+	}
+    else{
+    return 0;
     }
+
+
+}
+
+int closeDatabase(){
+    return sqlite3_close(db);
+}
+
+int sqlQuery(char *message){
+    
+    char *zErrMsg = 0;
+    int rc;
 
     rc = sqlite3_exec(db, message, callback, 0, &zErrMsg);
     free(message);
    
     if( rc != SQLITE_OK ){
-        fprintf(stderr, "SQL error: %s\n", zErrMsg);
+        return 1;
         sqlite3_free(zErrMsg);
     } else {
-        fprintf(stdout, "Sql query executed successfully\n");
         if(flag ==0){
-            fprintf(stdout, "Empty list\n");
-        }
-        else if(flag == -1){
-            fprintf(stdout, "Log written successfully\n");
+            return 1;
         }
     }
-        sqlite3_close(db);
+    return 0;
 }
 
 
-void printLog(char *programName){    
+int printLog(char *programName){    
     
-    char *sql = (char*) malloc(sizeof(char) * 250);
+    char *sql = (char*) malloc(sizeof(char) * 200);
     if (programName == NULL){
         sprintf (sql,"SELECT * FROM Log");
     }
     else{
         sprintf (sql,"SELECT * FROM Log WHERE Program='%s';",programName);
     }
-    sqlQuery(sql);
+    int rc = sqlQuery(sql);
+    if (rc == 1)
+    {
+        return 1;
+    }
+    return 0;
 }
 
-void saveLog(char *programName,char *message, int level){
-     flag = -1;
-     if(level < 0 || level > 3){
-        printf("level is incorrect, should be 1,2 or 3\n");
-         exit(1);
-     }
-    char *sql = (char*) malloc(sizeof(char) * 250);
+static char* levelConvert(int level){
+	switch (level)
+	{
+		case 1:
+			return "INFO";
+		case 2:
+			return "WARNING";
+		case 3:
+			return "ERROR";
+		default:
+			return "";
+	}
+}
 
-    sprintf (sql,"CREATE TABLE IF NOT EXISTS Log (Id INTEGER PRIMARY KEY, Program TEXT, Message TEXT, Level INT); \
-                  INSERT INTO Log (Program,Message,Level) VALUES ('%s','%s','%d');",programName,message,level);
+int saveLog(char *message, int level){
+     flag = -1;
+     if(level <= 0 || level > 3){
+         return 1;
+     }
+     else{
+    char *sql = (char*) malloc(sizeof(char) * 200);
+
+    sprintf (sql,"INSERT INTO Log (Program,Message,Level) VALUES ('%s','%s','%s');",globalProgramName,message,levelConvert(level));
     sqlQuery(sql);
+    return 0;
+}
 }
 
 
